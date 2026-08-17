@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>WebVR Hero - Spawn Demo</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#06040d;color:#fff;font-family:Arial,sans-serif}
+#hud{
+position:fixed;left:16px;top:16px;z-index:20;padding:14px 16px;border-radius:16px;
+background:rgba(8,7,18,.72);border:1px solid rgba(255,255,255,.14);
+backdrop-filter:blur(12px);box-shadow:0 10px 35px rgba(0,0,0,.35);pointer-events:none
+}
+#hud b{font-size:18px;letter-spacing:1px}
+#hud small{display:block;margin-top:6px;opacity:.8;line-height:1.35}
+#spawn{
+position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:30;
+padding:14px 24px;border:0;border-radius:999px;background:#7a5cff;color:#fff;
+font-size:18px;font-weight:800;cursor:pointer;box-shadow:0 8px 30px rgba(116,83,255,.45)
+}
+#spawn:hover{filter:brightness(1.15)}
+#status{margin-top:7px;color:#bcaeff;font-size:12px}
+</style>
+</head>
+<body>
+<div id="hud">
+  <b>WEBVR HERO</b>
+  <small>YOU HAVE SPAWNED.</small>
+  <small>Desktop: WASD + mouse • Space = super jump • Click = energy blast</small>
+  <small>VR: trigger = energy blast • grip = grab</small>
+  <div id="status">Ready.</div>
+</div>
+<button id="spawn">ENTER VR</button>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js";
+import {VRButton} from "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/webxr/VRButton.js";
+import {XRControllerModelFactory} from "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/webxr/XRControllerModelFactory.js";
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x06040d);
+scene.fog = new THREE.Fog(0x06040d, 20, 100);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, .05, 200);
+camera.position.set(0, 1.7, 6);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:"high-performance"});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local-floor");
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const vrButton = VRButton.createButton(renderer);
+vrButton.style.display = "none";
+document.body.appendChild(vrButton);
+
+const enter = document.getElementById("spawn");
+const status = document.getElementById("status");
+
+const hemi = new THREE.HemisphereLight(0x9c8dff,0x09070e,1.5);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xffffff,2.2);
+sun.position.set(-20,35,12);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024,1024);
+scene.add(sun);
+
+// WORLD
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(70,70),
+  new THREE.MeshStandardMaterial({color:0x171320,roughness:.95})
+);
+floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const grid = new THREE.GridHelper(70,35,0x4a3b75,0x1d182b);
+grid.position.y = .01;
+scene.add(grid);
+
+function box(x,y,z,w,h,d,color,emissive=0x000000){
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(w,h,d),
+    new THREE.MeshStandardMaterial({
+      color,roughness:.8,emissive,emissiveIntensity: emissive ? 1.8 : 0
+    })
+  );
+  m.position.set(x,y,z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  scene.add(m);
+  return m;
+}
+
+// Rooftops around the spawn point
+box(-13,4,-6,10,8,10,0x14141f);
+box(13,6,-10,12,12,12,0x12121c);
+box(-15,5,13,11,10,11,0x181421);
+box(15,3,14,13,6,13,0x15131e);
+box(0,8,-22,24,16,8,0x12121b);
+
+// spawn pad
+const pad = new THREE.Mesh(
+  new THREE.CylinderGeometry(2.2,2.2,.15,64),
+  new THREE.MeshStandardMaterial({
+    color:0x262040, emissive:0x5d38c7, emissiveIntensity:1.7
+  })
+);
+pad.position.set(0,.075,0);
+pad.receiveShadow = true;
+scene.add(pad);
+
+const padRing = new THREE.Mesh(
+  new THREE.TorusGeometry(2.05,.05,12,64),
+  new THREE.MeshBasicMaterial({color:0xa990ff})
+);
+padRing.rotation.x=Math.PI/2;
+padRing.position.y=.16;
+scene.add(padRing);
+
+// HERO BODY - you spawn immediately
+const hero = new THREE.Group();
+hero.position.set(0,1.05,0);
+scene.add(hero);
+
+const suit = new THREE.Mesh(
+  new THREE.CapsuleGeometry(.28,.72,8,16),
+  new THREE.MeshStandardMaterial({
+    color:0x1d2cff, roughness:.32, metalness:.35,
+    emissive:0x10156a, emissiveIntensity:.55
+  })
+);
+suit.castShadow=true;
+hero.add(suit);
+
+const head = new THREE.Mesh(
+  new THREE.SphereGeometry(.24,24,16),
+  new THREE.MeshStandardMaterial({
+    color:0x11131d,roughness:.4,metalness:.2
+  })
+);
+head.position.y=.62;
+head.castShadow=true;
+hero.add(head);
+
+const eyeMat = new THREE.MeshBasicMaterial({color:0xa88cff});
+for(const sx of [-.075,.075]){
+  const eye=new THREE.Mesh(new THREE.BoxGeometry(.045,.06,.025),eyeMat);
+  eye.position.set(sx,.65,-.225);
+  hero.add(eye);
+}
+
+// chest core
+const chest = new THREE.Mesh(
+  new THREE.OctahedronGeometry(.13),
+  new THREE.MeshStandardMaterial({
+    color:0xf1eaff,emissive:0x9b61ff,emissiveIntensity:5
+  })
+);
+chest.position.set(0,.1,-.27);
+hero.add(chest);
+
+const coreLight = new THREE.PointLight(0x8a5cff,8,5,2);
+coreLight.position.copy(chest.position);
+hero.add(coreLight);
+
+// floating beacon
+const beacon = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(.45,2),
+  new THREE.MeshStandardMaterial({
+    color:0xffffff,emissive:0x845dff,emissiveIntensity:5
+  })
+);
+beacon.position.set(0,4,-7);
+scene.add(beacon);
+
+// CRATES
+const crates=[];
+function crate(pos,color){
+  const o=new THREE.Mesh(
+    new THREE.BoxGeometry(.7,.7,.7),
+    new THREE.MeshStandardMaterial({color,roughness:.5,metalness:.15})
+  );
+  o.position.copy(pos);
+  o.castShadow=true;
+  o.userData.vel=new THREE.Vector3();
+  o.userData.heldBy=null;
+  scene.add(o); crates.push(o);
+}
+crate(new THREE.Vector3(2,.35,-2),0x62ddff);
+crate(new THREE.Vector3(-2,.35,-3),0xff63cf);
+crate(new THREE.Vector3(3,.35,-4),0x7aff9a);
+
+// energy blasts
+const blasts=[];
+function fireBlast(origin,dir){
+  const b=new THREE.Mesh(
+    new THREE.SphereGeometry(.13,12,12),
+    new THREE.MeshBasicMaterial({color:0xc3a8ff})
+  );
+  b.position.copy(origin);
+  b.userData.vel=dir.clone().normalize().multiplyScalar(28);
+  b.userData.life=1.8;
+  const light=new THREE.PointLight(0x995eff,8,4);
+  b.add(light);
+  scene.add(b);
+  blasts.push(b);
+}
+
+// desktop
+const keys={};
+let locked=false;
+let yaw=0,pitch=0;
+addEventListener("keydown",e=>{
+  keys[e.code]=true;
+  if(e.code==="Space" && !renderer.xr.isPresenting && camera.position.y<=1.71){
+    playerVel.y=10;
+  }
+});
+addEventListener("keyup",e=>keys[e.code]=false);
+
+renderer.domElement.addEventListener("click",()=>{
+  if(renderer.xr.isPresenting)return;
+  if(!locked){ renderer.domElement.requestPointerLock?.(); return; }
+  const dir=new THREE.Vector3(0,0,-1).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+  fireBlast(camera.position.clone(),dir);
+});
+
+document.addEventListener("pointerlockchange",()=>{
+  locked=document.pointerLockElement===renderer.domElement;
+});
+document.addEventListener("mousemove",e=>{
+  if(!locked || renderer.xr.isPresenting)return;
+  yaw-=e.movementX*.0022;
+  pitch-=e.movementY*.0022;
+  pitch=THREE.MathUtils.clamp(pitch,-1.35,1.35);
+});
+
+// VR controllers
+const factory = new XRControllerModelFactory();
+const controllers=[];
+for(let i=0;i<2;i++){
+  const c=renderer.xr.getController(i);
+  const g=renderer.xr.getControllerGrip(i);
+  g.add(factory.createControllerModel(g));
+  scene.add(g); scene.add(c);
+
+  const line=new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)
+    ]),
+    new THREE.LineBasicMaterial({color:0xe0d7ff})
+  );
+  line.scale.z=2.5;c.add(line);
+
+  c.userData.grabbed=null;
+
+  c.addEventListener("selectstart",()=>{
+    const origin=c.getWorldPosition(new THREE.Vector3());
+    const dir=new THREE.Vector3(0,0,-1)
+      .applyQuaternion(c.getWorldQuaternion(new THREE.Quaternion()))
+      .normalize();
+
+    const ray=new THREE.Raycaster(origin,dir,0,.75);
+    const hit=ray.intersectObjects(crates,false)[0];
+    if(hit){
+      c.userData.grabbed=hit.object;
+    }else{
+      fireBlast(origin,dir);
+    }
+  });
+
+  c.addEventListener("selectend",()=>{
+    const o=c.userData.grabbed;
+    if(!o)return;
+    const dir=new THREE.Vector3(0,0,-1)
+      .applyQuaternion(c.getWorldQuaternion(new THREE.Quaternion()))
+      .normalize();
+    o.userData.vel.copy(dir.multiplyScalar(12));
+    o.userData.heldBy=null;
+    c.userData.grabbed=null;
+  });
+
+  controllers.push(c);
+}
+
+// PLAYER MOVEMENT
+const playerVel=new THREE.Vector3();
+
+function desktopUpdate(dt){
+  if(renderer.xr.isPresenting)return;
+
+  camera.rotation.set(pitch,yaw,0,"YXZ");
+
+  const forward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+  const right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+  const move=new THREE.Vector3();
+
+  if(keys.KeyW||keys.ArrowUp)move.addScaledVector(forward,-1);
+  if(keys.KeyS||keys.ArrowDown)move.addScaledVector(forward,1);
+  if(keys.KeyA||keys.ArrowLeft)move.addScaledVector(right,-1);
+  if(keys.KeyD||keys.ArrowRight)move.addScaledVector(right,1);
+
+  if(move.lengthSq()){
+    move.normalize();
+    const speed=keys.ShiftLeft||keys.ShiftRight ? 11 : 5.5;
+    playerVel.x=THREE.MathUtils.lerp(playerVel.x,move.x*speed,Math.min(1,dt*10));
+    playerVel.z=THREE.MathUtils.lerp(playerVel.z,move.z*speed,Math.min(1,dt*10));
+  }else{
+    playerVel.x*=Math.pow(.05,dt);
+    playerVel.z*=Math.pow(.05,dt);
+  }
+
+  playerVel.y-=24*dt;
+  camera.position.addScaledVector(playerVel,dt);
+
+  if(camera.position.y<1.7){
+    camera.position.y=1.7;
+    playerVel.y=0;
+  }
+
+  camera.position.x=THREE.MathUtils.clamp(camera.position.x,-28,28);
+  camera.position.z=THREE.MathUtils.clamp(camera.position.z,-28,28);
+
+  hero.position.set(camera.position.x,1.05,camera.position.z);
+  hero.visible=false;
+}
+
+function vrUpdate(){
+  if(!renderer.xr.isPresenting)return;
+
+  // In VR the hero is spawned around the player's actual headset position.
+  const xrCam=renderer.xr.getCamera();
+  hero.position.set(xrCam.position.x,.95,xrCam.position.z);
+
+  // Turn the body toward headset direction.
+  const q=new THREE.Quaternion().copy(xrCam.quaternion);
+  const e=new THREE.Euler().setFromQuaternion(q,"YXZ");
+  hero.rotation.y=e.y;
+
+  for(const c of controllers){
+    const o=c.userData.grabbed;
+    if(o){
+      o.position.copy(c.getWorldPosition(new THREE.Vector3()));
+      o.quaternion.copy(c.quaternion);
+      o.userData.heldBy=c;
+    }
+  }
+}
+
+function updateCrates(dt){
+  for(const o of crates){
+    if(o.userData.heldBy)continue;
+    o.userData.vel.y-=18*dt;
+    o.position.addScaledVector(o.userData.vel,dt);
+    o.rotation.x+=dt*1.5;
+    o.rotation.y+=dt*2.2;
+    if(o.position.y<.38){
+      o.position.y=.38;
+      if(o.userData.vel.y<0)o.userData.vel.y*=-.45;
+      o.userData.vel.x*=.82;
+      o.userData.vel.z*=.82;
+    }
+    o.userData.vel.multiplyScalar(Math.pow(.93,dt*60));
+  }
+}
+
+function updateBlasts(dt){
+  for(let i=blasts.length-1;i>=0;i--){
+    const b=blasts[i];
+    b.position.addScaledVector(b.userData.vel,dt);
+    b.userData.life-=dt;
+
+    for(const o of crates){
+      if(b.position.distanceTo(o.position)<.75){
+        o.userData.vel.add(b.userData.vel.clone().normalize().multiplyScalar(10));
+        b.userData.life=0;
+      }
+    }
+
+    if(b.userData.life<=0){
+      scene.remove(b);blasts.splice(i,1);
+    }
+  }
+}
+
+enter.addEventListener("click",async()=>{
+  if(!("xr" in navigator)){
+    status.textContent="WebXR isn't available in this browser. Desktop mode is already active.";
+    enter.style.display="none";
+    return;
+  }
+
+  status.textContent="Spawning into VR…";
+  try{
+    const session=await navigator.xr.requestSession("immersive-vr",{requiredFeatures:["local-floor"]});
+    await renderer.xr.setSession(session);
+    enter.style.display="none";
+    status.textContent="SPAWNED. Look around — you're in the city.";
+  }catch(err){
+    console.error(err);
+    status.textContent="VR could not start. Use a WebXR-compatible browser/headset.";
+  }
+});
+
+// Show normal desktop controls immediately.
+status.textContent="SPAWNED. You are already in the level.";
+
+let last=performance.now();
+renderer.setAnimationLoop(()=>{
+  const now=performance.now();
+  const dt=Math.min(.05,(now-last)/1000);
+  last=now;
+
+  desktopUpdate(dt);
+  vrUpdate();
+  updateCrates(dt);
+  updateBlasts(dt);
+
+  beacon.rotation.x+=dt*.7;
+  beacon.rotation.y+=dt*1.2;
+
+  renderer.render(scene,camera);
+});
+
+addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
